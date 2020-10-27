@@ -9,7 +9,19 @@ load "$NCARG_ROOT/lib/ncarg/nclscripts/contrib/ut_string.ncl"
 ;; optional argument for whether you wanted monsoons, etc.  May move
 ;; into a separate file at some point.
 
-function getnames(interval)
+; Example: print(days_in_year(2000, "julian")) ; 366
+function days_in_year(year, calendar)
+begin
+  z0 = new(12,"integer")
+  z0 = 0
+  years = z0 + year
+  years@calendar = calendar
+  months = ispan(1,12,1)  
+  return( sum(days_in_month(years,months)) ) 
+end
+
+
+function getnames(interval, calendar)
 begin
   if (interval .eq. "season") then
     return((/"error","DJF","MAM","JJA","SON"/))
@@ -17,6 +29,9 @@ begin
   if (interval .eq. "month") then
     return((/"error","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"/))
   end if
+  if (interval .eq. "day") then
+      return( array_append_record("error", sprintf("%03.0f", ispan(1,days_in_year(2000,calendar,1)), 0) )
+  end if 
   return("getnames() error: unrecognized interval")
 end
 
@@ -53,10 +68,20 @@ format = "%Y-%N-%D %H:%M:%S"
 ;; offset  (optional: float added to time to shift day boundary)
 ;; taint   (boolean option: propagate missing values?)
 ;; verbose (boolean option: print progress indicators?)
+;; donemsg (boolean option: print completion message?)
+;; drop29  (boolean option: drop Feb 29th in leapyears, this is the default)
+;; drop366 (boolean option: drop day 366 in leapyears)
 
+if (.not. isvar("drop366")) then
+  drop29 = True
+end if
 
 if (.not. isvar("verbose")) then
   verbose = False
+end if
+
+if (.not. isvar("donemsg")) then
+  donemsg = False
 end if
 
 if (.not. isvar("check")) then
@@ -116,19 +141,18 @@ if(cyclic .and. interval .eq. "year") then
   exit
 end if
 
-if(cyclic .and. interval .eq. "day") then
-  print("Error: day interval not allowed with cyclic option (due to leap days).")
+;if(cyclic .and. interval .eq. "day") then
+;  print("Error: day interval not allowed with cyclic option (due to leap days).")
   ;; once NCL v.6.1.0 is readily available, this is actually an
   ;; allowable option.  Use day_of_year() to convert from Y/M/D output
   ;; of cd_calendar to julian day, and just discard day 366 in leap
   ;; years.  (day_of_year doesn't recognize calendars before v.6.1.0)
-  exit
-end if
+;  exit
+;end if
 
 if (verbose) then print("Opening "+infile) end if
 
 fin = addfile(infile, "r")
-
 
 if (verbose) then print("Reading time coordinate") end if
 
@@ -164,6 +188,20 @@ utc = ut_calendar(time, 0)
 year  = floattointeger(utc(:,0))
 month = floattointeger(utc(:,1))
 day   = floattointeger(utc(:,2))
+year@calendar = fin->time@calendar
+doy   = day_of_year(year,month,day)
+
+; remove feb 29 from doy
+; note that isleapyear() automatically resolves different calendars, given the calendar attribute
+; https://www.ncl.ucar.edu/Document/Functions/Built-in/isleapyear.shtml
+isleap = isleapyear(year)
+if (drop29) then
+  do i = 0, nt-1
+    if( isleap(i) .and. doy(i).ge.59 ) then
+      doy(i) = doy(i)-1
+    end if
+  end do
+end if
 
 if(interval .eq. "day") then
   tunits = str_get_field(time@units,1," ")
@@ -173,16 +211,19 @@ if(interval .eq. "day") then
     else if (tunits .eq. "hours") then
 ;;      jday  = doubletointeger(time/24)
       jday = floor(time/24)
+    else if (tunits .eq. "minutes") then
+        jday = floor(time/60/24)
     else
       print("Error: don't know how to convert time unit '"+tunits+"'into julian day.")
       exit
+    end if
     end if
   end if
 end if
 
 
 season = mon2seas(month)
-names =  getnames(interval)
+names =  getnames(interval, fin->time@calendar)
 
 
 ;; Construct mapping info:
@@ -195,6 +236,11 @@ oci = new(nt,"integer")
 
 if (cyclic) then
   ;; climatology - multi-year averages
+
+  if(interval .eq. "day") then
+    nout = dimsizes(names) - 1
+    bin = doy
+  end if
 
   if(interval .eq. "month") then 
     nout = dimsizes(names) - 1
@@ -345,18 +391,28 @@ if(outtime.eq."start") then
 end if
 if(outtime.eq."mid") then
   if(cyclic) then
+    outyear = tointeger((year(0)+year(nt-1))/2)
     if(interval.eq."month") then
       z0 = new(12,"integer")
+      z0 = 0
+      z0@calendar = fin->time@calendar
       mout = ispan(1,12,1)
+      time = cd_inv_calendar(z0+outyear,mout,z0+15,z0+12,z0,z0,fin->time@units, z0(0))
     end if
     if(interval.eq."season") then
       z0 = new(4,"integer")
+      z0 = 0
+      z0@calendar = fin->time@calendar
       mout = (/1,4,7,10/)
+      time = cd_inv_calendar(z0+outyear,mout,z0+15,z0+12,z0,z0,fin->time@units, z0(0))
     end if
-    z0 = 0
-    z0@calendar = fin->time@calendar
-    outyear = tointeger((year(0)+year(nt-1))/2)
-    time = ut_inv_calendar(z0+outyear,mout,z0+15,z0+12,z0,z0,fin->time@units, z0(0))
+    if(interval.eq."day") then
+      maxdays = days_in_year(2000,calendar,1)
+      z0 = new(maxdays,"integer")
+      z0 = 0
+      z0@calendar = fin->time@calendar
+      time = cd_inv_calendar(z0+outyear,z0+1,ispan(1,maxdays,1),z0+12,z0,z0,fin->time@units, z0(0))
+    end if
   else
     time = cell_bnds(:,1)
     time = (time + cell_bnds(:,0))/2
@@ -400,7 +456,7 @@ outdata@cell_methods = cmstring
 
 if (verbose) then print("Creating output file") end if
 
-system("rm "+outfile)
+system("rm -f "+outfile)
 fout = addfile(outfile, "c")
 filedimdef(fout,"time",-1,True)  ;; make time dimension unlimited
 
@@ -459,6 +515,8 @@ fout@history = hstring+inttochar(10)+fout@history
 ;; update unique tracking_id
 fout@tracking_id = systemfunc("uuidgen")
 
+
+if (donemsg) then print("Done: "+outfile) end if
 
 ;; provenance checking - to be sure that your data is coming from where you think it should.
 
