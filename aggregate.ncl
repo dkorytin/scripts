@@ -1,7 +1,8 @@
 ;;; Aggregates 3-hourly NARCCAP data to averages over daily and longer periods
 
-load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/contributed.ncl"
-load "$NCARG_ROOT/lib/ncarg/nclscripts/contrib/ut_string.ncl"
+;load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/contributed.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/contrib/cd_string.ncl"
+
 
 
 ;; This stuff is localized into functions so that seasons or their
@@ -9,7 +10,7 @@ load "$NCARG_ROOT/lib/ncarg/nclscripts/contrib/ut_string.ncl"
 ;; optional argument for whether you wanted monsoons, etc.  May move
 ;; into a separate file at some point.
 
-; Example: print(days_in_year(2000, "julian")) ; 366
+; Example: print(days_in_year(1996, "julian")) ; 366
 function days_in_year(year, calendar)
 begin
   z0 = new(12,"integer")
@@ -30,7 +31,7 @@ begin
     return((/"error","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"/))
   end if
   if (interval .eq. "day") then
-      return( array_append_record("error", sprintf("%03.0f", ispan(1,days_in_year(2000,calendar,1)), 0) )
+      return( array_append_record("error", sprintf("%03.0f", ispan(1,days_in_year(1996,calendar),1)),0 ) )
   end if 
   return("getnames() error: unrecognized interval")
 end
@@ -183,7 +184,7 @@ end if
  
 ;; Extract month & year using ut_calendar
 
-utc = ut_calendar(time, 0)
+utc = cd_calendar(time, 0)
 
 year  = floattointeger(utc(:,0))
 month = floattointeger(utc(:,1))
@@ -407,7 +408,7 @@ if(outtime.eq."mid") then
       time = cd_inv_calendar(z0+outyear,mout,z0+15,z0+12,z0,z0,fin->time@units, z0(0))
     end if
     if(interval.eq."day") then
-      maxdays = days_in_year(2000,calendar,1)
+      maxdays = days_in_year(1996,fin->time@calendar)
       z0 = new(maxdays,"integer")
       z0 = 0
       z0@calendar = fin->time@calendar
@@ -530,8 +531,7 @@ if (verbose) then print("") end if
   db = ndtooned(time_bnds)
   db@calendar = time@calendar
   db@units = time@units
-  ;; Note: ut_string complains about illegal arguments for 360-day calendar, but still gives correct results
-  date_bnds = onedtond(ut_string(db,format), dimsizes(time_bnds))
+  date_bnds = onedtond(cd_string(db,format), dimsizes(time_bnds))
   
   tab = "	"
 
